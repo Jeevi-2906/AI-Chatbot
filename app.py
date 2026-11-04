@@ -20,6 +20,7 @@ from backend.chatbot import (
     get_or_create_conversation,
     clear_conversation,
     get_model_name,
+    get_max_history_messages,
 )
 
 # Load environment variables
@@ -38,11 +39,12 @@ def index():
 
 @app.route("/health", methods=["GET"])
 def health():
-    """Health check endpoint to verify backend server status and configured model."""
+    """Health check endpoint to verify backend server status and configuration."""
     return jsonify({
         "status": "ok",
         "message": "Flask server is up and running",
-        "model": get_model_name()
+        "model": get_model_name(),
+        "max_history_messages": get_max_history_messages()
     }), 200
 
 
@@ -72,7 +74,7 @@ def chat():
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
         return jsonify({
-            "error": "Invalid request: Expected a JSON object."
+            "error": "Invalid request: Expected a JSON object in the request body."
         }), 400
 
     # 2. Extract and validate user message
@@ -89,11 +91,15 @@ def chat():
     else:
         conversation_id = conversation_id.strip()
 
+    # Optional key override (for testing error handling)
+    api_key_override = data.get("api_key_override")
+
     # 4. Communicate with Gemini API via conversation manager
     try:
         reply = send_chat_message(
             conversation_id=conversation_id,
-            user_message=user_message.strip()
+            user_message=user_message.strip(),
+            api_key_override=api_key_override
         )
         return jsonify({
             "response": reply,
@@ -101,23 +107,34 @@ def chat():
         }), 200
 
     except ValueError as ve:
-        # Client validation or configuration error (e.g. missing API key)
+        # Client validation or missing API key
         return jsonify({
             "error": str(ve),
             "conversation_id": conversation_id
         }), 400
 
     except RuntimeError as re:
-        # API execution or upstream server errors
+        # Upstream Gemini API error, network timeout, or rate limit
+        err_msg = str(re)
+        status_code = 502
+        if "Authentication failed" in err_msg:
+            status_code = 401
+        elif "Rate limit" in err_msg:
+            status_code = 429
+        elif "temporarily busy" in err_msg:
+            status_code = 503
+
         return jsonify({
-            "error": str(re),
+            "error": err_msg,
             "conversation_id": conversation_id
-        }), 502
+        }), status_code
 
     except Exception as e:
-        # Uncaught server errors (never leak stack trace)
+        # Log server error to stderr for debugging
+        print(f"[INTERNAL ERROR IN /chat]: {type(e).__name__}: {str(e)}", flush=True)
+        # Internal server error without leaking stack traces or sensitive data
         return jsonify({
-            "error": "An unexpected internal server error occurred. Please try again.",
+            "error": "An internal server error occurred while processing your request. Please try again.",
             "conversation_id": conversation_id
         }), 500
 
@@ -158,6 +175,17 @@ def get_history(cid: str):
         "message_count": len(history),
         "history": history
     }), 200
+
+
+# Custom error handlers to guarantee JSON responses and prevent stack trace leaks
+@app.errorhandler(404)
+def not_found(e):
+    return jsonify({"error": "Resource not found."}), 404
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    return jsonify({"error": "Internal server error. Please try again later."}), 500
 
 
 if __name__ == "__main__":
