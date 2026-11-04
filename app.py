@@ -23,7 +23,7 @@ from backend.chatbot import (
 )
 
 # Load environment variables
-load_dotenv()
+load_dotenv(override=True)
 
 # Initialize Flask application
 app = Flask(__name__)

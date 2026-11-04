@@ -58,6 +58,8 @@ def get_gemini_client() -> genai.Client:
     Raises:
         ValueError: If GEMINI_API_KEY is missing or contains placeholder text.
     """
+    # Reload environment to automatically pick up any edits to .env without requiring server restart
+    load_dotenv(override=True)
     api_key = os.getenv("GEMINI_API_KEY", "").strip()
     if not api_key or api_key == "your_gemini_api_key_here":
         raise ValueError(
@@ -73,6 +75,7 @@ def get_model_name() -> str:
     Retrieve configured Gemini model name with fallback.
     Default: 'gemini-3-flash-preview'
     """
+    load_dotenv(override=True)
     return os.getenv("GEMINI_MODEL", "gemini-3-flash-preview").strip()
 
 
