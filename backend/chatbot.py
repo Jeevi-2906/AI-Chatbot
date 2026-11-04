@@ -79,10 +79,10 @@ def get_gemini_client(custom_key: Optional[str] = None) -> genai.Client:
 def get_model_name() -> str:
     """
     Retrieve configured Gemini model name with fallback.
-    Default: 'gemini-3.5-flash'
+    Default: 'gemini-flash-lite-latest'
     """
     load_dotenv(override=True)
-    return os.getenv("GEMINI_MODEL", "gemini-3.5-flash").strip()
+    return os.getenv("GEMINI_MODEL", "gemini-flash-lite-latest").strip()
 
 
 def get_max_history_messages() -> int:
