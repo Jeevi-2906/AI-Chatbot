@@ -5,8 +5,9 @@ Responsibilities:
 1. Initialize the official Google GenAI SDK client.
 2. Define the educational system prompt.
 3. Maintain in-memory conversation histories for distinct conversation IDs.
-4. Prepare multi-turn context and communicate with Gemini API with retry resilience.
-5. Return AI-generated responses and cleanly manage errors.
+4. Implement Context Window Management using Last-N-Message Truncation.
+5. Prepare multi-turn context and communicate with Gemini API with retry resilience.
+6. Return AI-generated responses and cleanly manage errors.
 """
 
 import os
@@ -29,7 +30,9 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
 # Load environment variables from .env
 load_dotenv()
 
-# System prompt establishing a friendly educational AI assistant persona
+# System prompt establishing a friendly educational AI assistant persona.
+# NOTE: The system prompt is kept separate from ordinary conversation turns
+# and is injected via GenerateContentConfig on every request.
 SYSTEM_PROMPT = """You are a friendly, encouraging, and knowledgeable educational AI assistant.
 Your goal is to help beginners understand programming, computer science, and Artificial Intelligence concepts.
 
@@ -68,9 +71,21 @@ def get_gemini_client() -> genai.Client:
 def get_model_name() -> str:
     """
     Retrieve configured Gemini model name with fallback.
-    Default: 'gemini-2.5-flash'
+    Default: 'gemini-3-flash-preview'
     """
-    return os.getenv("GEMINI_MODEL", "gemini-2.5-flash").strip()
+    return os.getenv("GEMINI_MODEL", "gemini-3-flash-preview").strip()
+
+
+def get_max_history_messages() -> int:
+    """
+    Retrieve the maximum number of recent messages to retain in the API context window.
+    Default: 6 messages (e.g. 3 user-assistant interaction pairs).
+    """
+    try:
+        val = int(os.getenv("MAX_HISTORY_MESSAGES", 6))
+        return val if val > 0 else 6
+    except (ValueError, TypeError):
+        return 6
 
 
 def get_or_create_conversation(conversation_id: str) -> List[Dict[str, str]]:
@@ -88,9 +103,56 @@ def clear_conversation(conversation_id: str) -> bool:
     return False
 
 
+def truncate_history(history: List[Dict[str, str]], max_messages: Optional[int] = None) -> List[Dict[str, str]]:
+    """
+    CONTEXT WINDOW MANAGEMENT: Last-N-Message Truncation Strategy.
+
+    How Truncation Works:
+    --------------------
+    1. Large Language Models have context limits and charge tokens for every message sent.
+       As conversations grow arbitrarily long, sending unlimited history wastes tokens,
+       increases latency, and can exceed model context limits.
+    2. We retain the FULL conversation history in application memory (for auditing / UI),
+       but slice only the most recent `N` messages to transmit to the Gemini API.
+    3. Complete Turn Pair Preservation:
+       If a naive slice `history[-N:]` begins with an 'assistant' message, that assistant
+       reply would be orphaned (lacking its matching user question).
+       Gemini multi-turn dialogs must begin with a 'user' turn.
+       Therefore, if the first message in the sliced window is an 'assistant' role,
+       we drop that leading message so the truncated window always starts cleanly with
+       a 'user' turn.
+    4. The current user prompt is guaranteed to be the final element in the truncated window.
+    5. The system prompt remains separate and is not counted against this message limit.
+
+    Args:
+        history: The complete list of conversation turns.
+        max_messages: Maximum recent messages to retain. Defaults to MAX_HISTORY_MESSAGES.
+
+    Returns:
+        A pruned list of message dictionaries ready for API transmission.
+    """
+    if max_messages is None:
+        max_messages = get_max_history_messages()
+
+    if not history or len(history) <= max_messages:
+        # Full history fits within context window
+        return list(history)
+
+    # 1. Take the last N messages
+    truncated = list(history[-max_messages:])
+
+    # 2. Preserve message pair integrity:
+    # A valid multi-turn conversation sequence should start with a 'user' message.
+    # If our slice starts with an orphaned 'assistant' response, strip it.
+    if truncated and truncated[0].get("role") == "assistant":
+        truncated = truncated[1:]
+
+    return truncated
+
+
 def build_gemini_contents(history: List[Dict[str, str]]) -> List[types.Content]:
     """
-    Convert stored conversation history into Gemini SDK types.Content objects.
+    Convert a list of message dicts into Gemini SDK types.Content objects.
     Maps internal role 'assistant' to Gemini API role 'model'.
     """
     contents: List[types.Content] = []
@@ -114,23 +176,15 @@ def send_chat_message(
     """
     Send a user message within a multi-turn conversation to the Gemini API.
 
-    Features:
-    1. Validates non-empty input and retrieves conversation memory.
-    2. Temporarily appends user message to history.
-    3. Translates history into Gemini Content structures.
-    4. Attaches educational system prompt.
-    5. Retries on transient server/availability spikes (503/429) with exponential backoff.
-    6. On success: stores assistant reply and returns response text.
-    7. On failure: cleanly rolls back the pending user message to preserve history integrity.
-
-    Args:
-        conversation_id: Unique identifier for the conversation session.
-        user_message: The text submitted by the user.
-        max_retries: Number of retry attempts for transient server spikes.
-        initial_delay: Seconds to delay before the first retry attempt.
-
-    Returns:
-        The model's text response.
+    Workflow:
+    1. Validates non-empty input and retrieves full conversation history.
+    2. Appends the user's latest message to in-memory history.
+    3. Applies Last-N-Message Truncation to select only the recent context window.
+    4. Translates the truncated window into Gemini Content structures.
+    5. Attaches the educational system prompt via GenerateContentConfig.
+    6. Sends request to Gemini API (with exponential backoff on 503/429 spikes).
+    7. On success: stores the assistant reply in full history and returns it.
+    8. On failure: cleanly rolls back the user message to prevent corruption.
     """
     clean_message = (user_message or "").strip()
     if not clean_message:
@@ -144,10 +198,13 @@ def send_chat_message(
     client = get_gemini_client()
     model_name = get_model_name()
 
-    # 2. Build contents payload from history
-    gemini_contents = build_gemini_contents(history)
+    # 2. Apply Last-N-Message truncation for API request
+    truncated_context = truncate_history(history)
 
-    # 3. Configure system instruction
+    # 3. Build contents payload from the truncated context window
+    gemini_contents = build_gemini_contents(truncated_context)
+
+    # 4. Configure system instruction
     config = types.GenerateContentConfig(
         system_instruction=SYSTEM_PROMPT,
         temperature=0.7,
@@ -168,13 +225,12 @@ def send_chat_message(
             if not reply_text:
                 reply_text = "I received your message, but no response was generated."
 
-            # 4. Successfully received response: append assistant message
+            # 5. Successfully received response: append assistant message
             history.append({"role": "assistant", "content": reply_text})
             return reply_text
 
         except (ServerError, APIError) as e:
             last_exception = e
-            # If server indicates high demand (503) or rate limit (429), retry with backoff
             status_code = getattr(e, "code", None) or getattr(e, "status_code", 500)
             if attempt < max_retries and status_code in (429, 503, 500):
                 time.sleep(delay)
@@ -195,29 +251,34 @@ def send_chat_message(
 
 
 if __name__ == "__main__":
-    import uuid
+    print("=" * 65)
+    print("PHASE 4: CONTEXT WINDOW TRUNCATION TEST")
+    print(f"Configured MAX_HISTORY_MESSAGES: {get_max_history_messages()}")
+    print("=" * 65)
 
-    print("=" * 60)
-    print("PHASE 3 TEST: Multi-Turn Conversation Memory Verification")
-    print(f"Model: {get_model_name()}")
-    print("=" * 60)
-
-    test_cid = f"test-conv-{uuid.uuid4().hex[:6]}"
-    conversation_turns = [
-        "My name is Jeevika.",
-        "I am studying Artificial Intelligence.",
-        "What is my name and what am I studying?"
+    # Simulate a long conversation with 10 messages (5 user/assistant pairs)
+    mock_history = [
+        {"role": "user", "content": "Question 1: What is a variable?"},
+        {"role": "assistant", "content": "Answer 1: A container for storing data."},
+        {"role": "user", "content": "Question 2: What is a loop?"},
+        {"role": "assistant", "content": "Answer 2: A structure that repeats code."},
+        {"role": "user", "content": "Question 3: What is a function?"},
+        {"role": "assistant", "content": "Answer 3: A reusable block of code."},
+        {"role": "user", "content": "Question 4: What is recursion?"},
+        {"role": "assistant", "content": "Answer 4: A function calling itself."},
+        {"role": "user", "content": "Question 5: What is an algorithm?"},
+        {"role": "assistant", "content": "Answer 5: A step-by-step problem-solving procedure."},
+        {"role": "user", "content": "Question 6: What is AI?"}
     ]
 
-    for turn_num, user_turn in enumerate(conversation_turns, start=1):
-        print(f"\n[Turn {turn_num}] User: {user_turn}")
-        try:
-            bot_reply = send_chat_message(test_cid, user_turn)
-            print(f"[Turn {turn_num}] Bot:\n{bot_reply}")
-        except Exception as ex:
-            print(f"[Turn {turn_num} Error]: {ex}")
-            break
+    print(f"Total messages in full history: {len(mock_history)}")
 
-    print("\nRecorded In-Memory Conversation History:")
-    for m in conversations[test_cid]:
-        print(f" - {m['role'].upper()}: {m['content']}")
+    # Test truncation with limit of 4
+    truncated_4 = truncate_history(mock_history, max_messages=4)
+    print(f"\nTruncated to 4 messages (preserves pair integrity, starts with user):")
+    for idx, msg in enumerate(truncated_4, 1):
+        print(f"  {idx}. [{msg['role'].upper()}]: {msg['content']}")
+
+    assert truncated_4[0]["role"] == "user", "Truncated window must start with user turn!"
+    assert truncated_4[-1]["content"] == "Question 6: What is AI?", "Latest user message must be preserved!"
+    print("\nTruncation unit test passed successfully!")

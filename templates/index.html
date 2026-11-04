@@ -3,14 +3,86 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LLM API Integration Chatbot</title>
+    <title>AI-1 LLM Chatbot | Educational Assistant</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="container">
-        <h1>LLM API Integration Chatbot</h1>
-        <p class="status">Phase 1: Flask Environment Active</p>
+    <div class="chat-wrapper">
+        <!-- Chat Header -->
+        <header class="chat-header">
+            <div class="header-info">
+                <div class="header-avatar">AI</div>
+                <div>
+                    <h1 class="header-title">Educational AI Assistant</h1>
+                    <div class="header-status">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Powered by Google Gemini</span>
+                    </div>
+                </div>
+            </div>
+            <div class="header-actions">
+                <button id="new-chat-btn" class="btn btn-secondary" title="Start a fresh conversation">
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M12 5v14M5 12h14"/>
+                    </svg>
+                    New Chat
+                </button>
+            </div>
+        </header>
+
+        <!-- Error Notification Banner -->
+        <div id="error-banner" class="error-banner" style="display: none;">
+            <span id="error-text">An error occurred.</span>
+            <button id="error-close-btn" class="error-close" aria-label="Close error">&times;</button>
+        </div>
+
+        <!-- Chat Messages Container -->
+        <main id="chat-messages" class="chat-messages" aria-live="polite">
+            <!-- Initial Welcome Message from Assistant -->
+            <div class="message assistant-message">
+                <div class="message-avatar">AI</div>
+                <div class="message-content">
+                    <p>Hello! I am your friendly educational AI assistant. I'm here to help you learn programming, computer science, and Artificial Intelligence.</p>
+                    <p>Ask me any question, explore a technical topic, or ask for code examples to get started!</p>
+                </div>
+            </div>
+        </main>
+
+        <!-- Typing Indicator (Hidden by default) -->
+        <div id="typing-indicator" class="typing-indicator" style="display: none;">
+            <div class="message-avatar">AI</div>
+            <div class="typing-bubble">
+                <span class="dot"></span>
+                <span class="dot"></span>
+                <span class="dot"></span>
+            </div>
+        </div>
+
+        <!-- Chat Input Footer -->
+        <footer class="chat-footer">
+            <form id="chat-form" class="chat-form">
+                <div class="input-container">
+                    <textarea 
+                        id="user-input" 
+                        class="chat-input" 
+                        placeholder="Type your question or message here..." 
+                        rows="1" 
+                        required></textarea>
+                    <button type="submit" id="send-btn" class="btn btn-primary" aria-label="Send message">
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="22" y1="2" x2="11" y2="13"></line>
+                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                        </svg>
+                        <span>Send</span>
+                    </button>
+                </div>
+                <div class="input-hint">
+                    Press <strong>Enter</strong> to send, <strong>Shift + Enter</strong> for a new line
+                </div>
+            </form>
+        </footer>
     </div>
+
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html>
