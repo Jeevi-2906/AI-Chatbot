@@ -48,6 +48,9 @@ Guidelines:
 # Value: list of message dicts [{"role": "user"|"assistant", "content": "..."}]
 conversations: Dict[str, List[Dict[str, str]]] = {}
 
+# Metadata for conversations (title, timestamps) to support Past Chats list
+conversation_metadata: Dict[str, Dict] = {}
+
 
 def get_gemini_client(custom_key: Optional[str] = None) -> genai.Client:
     """
@@ -109,8 +112,36 @@ def clear_conversation(conversation_id: str) -> bool:
     """Clear conversation history for a given conversation_id."""
     if conversation_id in conversations:
         conversations[conversation_id] = []
+        conversation_metadata.pop(conversation_id, None)
         return True
     return False
+
+
+def delete_conversation(conversation_id: str) -> bool:
+    """Permanently delete a conversation from memory."""
+    conversations.pop(conversation_id, None)
+    conversation_metadata.pop(conversation_id, None)
+    return True
+
+
+def get_all_conversations() -> List[Dict]:
+    """Return a list of all active conversations with metadata, sorted by recent activity."""
+    result = []
+    for cid, history in conversations.items():
+        if not history:
+            continue
+        meta = conversation_metadata.get(cid, {})
+        first_user_msg = next((m["content"] for m in history if m["role"] == "user"), "Conversation")
+        title = meta.get("title") or (first_user_msg[:32] + ("..." if len(first_user_msg) > 32 else ""))
+        result.append({
+            "conversation_id": cid,
+            "title": title,
+            "message_count": len(history),
+            "created_at": meta.get("created_at", 0),
+            "updated_at": meta.get("updated_at", 0),
+        })
+    result.sort(key=lambda x: x["updated_at"], reverse=True)
+    return result
 
 
 def truncate_history(history: List[Dict[str, str]], max_messages: Optional[int] = None) -> List[Dict[str, str]]:
@@ -181,6 +212,7 @@ def send_chat_message(
     conversation_id: str,
     user_message: str,
     api_key_override: Optional[str] = None,
+    max_history: Optional[int] = None,
     max_retries: int = 3
 ) -> str:
     """
@@ -189,11 +221,11 @@ def send_chat_message(
     Workflow:
     1. Validates non-empty input and retrieves full conversation history.
     2. Appends the user's latest message to in-memory history.
-    3. Applies Last-N-Message Truncation to select only the recent context window.
+    3. Applies Last-N-Message Truncation with the configured or requested N limit.
     4. Translates the truncated window into Gemini Content structures.
     5. Attaches the educational system prompt via GenerateContentConfig.
     6. Sends request to Gemini API (with automatic retry for transient 429/503 spikes).
-    7. On success: stores the assistant reply in full history and returns it.
+    7. On success: stores the assistant reply in full history and updates metadata.
     8. On failure: cleanly rolls back the user message to prevent history corruption.
     """
     clean_message = (user_message or "").strip()
@@ -205,6 +237,18 @@ def send_chat_message(
     # 1. Temporarily append user message to local history
     history.append({"role": "user", "content": clean_message})
 
+    # Track conversation metadata for the "Past Chats" history panel
+    now = time.time()
+    if conversation_id not in conversation_metadata:
+        preview = clean_message[:35] + ("..." if len(clean_message) > 35 else "")
+        conversation_metadata[conversation_id] = {
+            "title": preview,
+            "created_at": now,
+            "updated_at": now
+        }
+    else:
+        conversation_metadata[conversation_id]["updated_at"] = now
+
     last_error: Optional[Exception] = None
 
     for attempt in range(1, max_retries + 1):
@@ -212,8 +256,9 @@ def send_chat_message(
             client = get_gemini_client(custom_key=api_key_override)
             model_name = get_model_name()
 
-            # 2. Apply Last-N-Message truncation for API request
-            truncated_context = truncate_history(history)
+            # 2. Apply Last-N-Message truncation (using requested N or .env MAX_HISTORY_MESSAGES)
+            effective_n = max_history if (max_history is not None and max_history > 0) else None
+            truncated_context = truncate_history(history, max_messages=effective_n)
 
             # 3. Build contents payload from the truncated context window
             gemini_contents = build_gemini_contents(truncated_context)
@@ -236,6 +281,7 @@ def send_chat_message(
 
             # 5. Successfully received response: append assistant message
             history.append({"role": "assistant", "content": reply_text})
+            conversation_metadata[conversation_id]["updated_at"] = time.time()
             return reply_text
 
         except (ClientError, ServerError, APIError) as e:

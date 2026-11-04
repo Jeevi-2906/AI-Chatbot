@@ -19,6 +19,8 @@ from backend.chatbot import (
     send_chat_message,
     get_or_create_conversation,
     clear_conversation,
+    delete_conversation,
+    get_all_conversations,
     get_model_name,
     get_max_history_messages,
 )
@@ -91,15 +93,22 @@ def chat():
     else:
         conversation_id = conversation_id.strip()
 
-    # Optional key override (for testing error handling)
+    # Optional key override and custom N history size
     api_key_override = data.get("api_key_override")
+    max_history = data.get("max_history")
+    if max_history is not None:
+        try:
+            max_history = int(max_history)
+        except (ValueError, TypeError):
+            max_history = None
 
     # 4. Communicate with Gemini API via conversation manager
     try:
         reply = send_chat_message(
             conversation_id=conversation_id,
             user_message=user_message.strip(),
-            api_key_override=api_key_override
+            api_key_override=api_key_override,
+            max_history=max_history
         )
         return jsonify({
             "response": reply,
@@ -163,6 +172,25 @@ def reset_chat():
         "status": "cleared",
         "conversation_id": conversation_id,
         "message": "Conversation history has been reset successfully."
+    }), 200
+
+
+@app.route("/chat/conversations", methods=["GET"])
+def list_conversations():
+    """Returns the list of all past conversations for the sidebar history."""
+    return jsonify({
+        "conversations": get_all_conversations()
+    }), 200
+
+
+@app.route("/chat/conversations/<cid>", methods=["DELETE"])
+def remove_conversation(cid: str):
+    """Deletes a past conversation by ID."""
+    delete_conversation(cid)
+    return jsonify({
+        "status": "deleted",
+        "conversation_id": cid,
+        "message": "Conversation removed successfully."
     }), 200
 
 

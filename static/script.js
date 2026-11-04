@@ -1,13 +1,12 @@
 /**
  * script.js - Vanilla JavaScript Frontend Controller for Gemini Chatbot.
  * 
- * Responsibilities:
- * 1. Manage active conversation session IDs.
- * 2. Capture and validate user input (Enter to send, Shift+Enter for newline).
- * 3. Communicate asynchronously with Flask backend via Fetch API (POST /chat).
- * 4. Display user and assistant message bubbles with Markdown-like formatting.
- * 5. Manage loading/typing states, error banners, and auto-scrolling.
- * 6. Provide "New Chat" session reset functionality.
+ * Features:
+ * 1. "Past Chats" history sidebar with conversation switching and deletion.
+ * 2. User-configurable "Last N Messages" Context Window setting.
+ * 3. Asynchronous Fetch API communication (POST /chat, GET /chat/conversations, GET /chat/history).
+ * 4. Markdown rendering for bold, italics, code blocks, and lists.
+ * 5. Typing indicator, error banners, auto-grow input, and mobile responsive drawer.
  */
 
 document.addEventListener("DOMContentLoaded", () => {
@@ -17,19 +16,34 @@ document.addEventListener("DOMContentLoaded", () => {
     const userInput = document.getElementById("user-input");
     const sendBtn = document.getElementById("send-btn");
     const newChatBtn = document.getElementById("new-chat-btn");
+    const headerNewChatBtn = document.getElementById("header-new-chat-btn");
     const typingIndicator = document.getElementById("typing-indicator");
     const errorBanner = document.getElementById("error-banner");
     const errorText = document.getElementById("error-text");
     const errorCloseBtn = document.getElementById("error-close-btn");
+    const pastChatsList = document.getElementById("past-chats-list");
+    const nContextInput = document.getElementById("n-context-input");
+    const contextBadge = document.getElementById("context-badge");
+    const sidebar = document.getElementById("chat-sidebar");
+    const sidebarToggle = document.getElementById("sidebar-toggle");
+    const sidebarOverlay = document.getElementById("sidebar-overlay");
 
     // Session State
     let conversationId = generateUUID();
     let isProcessing = false;
 
-    console.log(`Initialized chat session with ID: ${conversationId}`);
+    // Load saved N context window setting from localStorage (default: 6)
+    const savedN = localStorage.getItem("max_history") || "6";
+    if (nContextInput) {
+        nContextInput.value = savedN;
+        updateContextBadge(savedN);
+    }
 
     // Auto-focus input on page load
     userInput.focus();
+
+    // Fetch initial list of past chats
+    loadPastChats();
 
     // --------------------------------------------------------------------------
     // Event Listeners
@@ -55,13 +69,31 @@ document.addEventListener("DOMContentLoaded", () => {
         userInput.style.height = `${Math.min(userInput.scrollHeight, 120)}px`;
     });
 
-    // New Chat button
-    newChatBtn.addEventListener("click", resetConversation);
+    // New Chat buttons (both sidebar and header)
+    newChatBtn.addEventListener("click", startNewChat);
+    headerNewChatBtn.addEventListener("click", startNewChat);
+
+    // Context N Input Change
+    if (nContextInput) {
+        nContextInput.addEventListener("change", () => {
+            let val = parseInt(nContextInput.value, 10);
+            if (isNaN(val) || val < 2) val = 2;
+            nContextInput.value = val;
+            localStorage.setItem("max_history", val.toString());
+            updateContextBadge(val);
+        });
+    }
 
     // Dismiss error banner
-    errorCloseBtn.addEventListener("click", () => {
-        hideError();
-    });
+    errorCloseBtn.addEventListener("click", hideError);
+
+    // Mobile Sidebar Toggle
+    if (sidebarToggle) {
+        sidebarToggle.addEventListener("click", toggleSidebar);
+    }
+    if (sidebarOverlay) {
+        sidebarOverlay.addEventListener("click", closeSidebar);
+    }
 
     // --------------------------------------------------------------------------
     // Message Handling & Communication
@@ -84,6 +116,9 @@ document.addEventListener("DOMContentLoaded", () => {
         // 2. Display Typing Indicator
         showTypingIndicator();
 
+        // Retrieve current N context setting
+        const currentN = nContextInput ? parseInt(nContextInput.value, 10) : 6;
+
         try {
             // 3. Send message to Flask POST /chat endpoint
             const response = await fetch("/chat", {
@@ -94,6 +129,7 @@ document.addEventListener("DOMContentLoaded", () => {
                 body: JSON.stringify({
                     message: text,
                     conversation_id: conversationId,
+                    max_history: currentN
                 }),
             });
 
@@ -112,10 +148,12 @@ document.addEventListener("DOMContentLoaded", () => {
             // 4. Render Assistant Response Bubble
             appendMessage("assistant", data.response || "No response received.");
 
+            // 5. Refresh past chats sidebar to reflect recent conversation title
+            loadPastChats();
+
         } catch (error) {
             console.error("Chat communication error:", error);
             showError(`Error: ${error.message}`);
-            // Also append an error note directly into chat stream
             appendMessage(
                 "assistant",
                 "⚠️ *Sorry, I encountered an issue processing your request. Please try again or click 'New Chat'.*"
@@ -127,28 +165,16 @@ document.addEventListener("DOMContentLoaded", () => {
         }
     }
 
-    async function resetConversation() {
+    function startNewChat() {
         if (isProcessing) return;
 
-        const oldId = conversationId;
         hideError();
-
-        try {
-            // Notify backend to reset history for old session
-            await fetch("/chat/reset", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ conversation_id: oldId }),
-            });
-        } catch (err) {
-            console.warn("Could not notify backend of reset:", err);
-        }
-
-        // Generate a new unique session identifier
         conversationId = generateUUID();
-        console.log(`Started new chat session with ID: ${conversationId}`);
 
-        // Reset message list to initial greeting
+        // Clear active selection in sidebar
+        document.querySelectorAll(".past-chat-item").forEach(el => el.classList.remove("active"));
+
+        // Reset message container to fresh welcome greeting
         chatMessages.innerHTML = `
             <div class="message assistant-message">
                 <div class="message-avatar">AI</div>
@@ -161,13 +187,132 @@ document.addEventListener("DOMContentLoaded", () => {
         userInput.value = "";
         userInput.style.height = "auto";
         userInput.focus();
+        closeSidebar();
     }
 
     // --------------------------------------------------------------------------
-    // UI Helpers
+    // Past Chats & History Management
     // --------------------------------------------------------------------------
 
-    function appendMessage(role, text) {
+    async function loadPastChats() {
+        if (!pastChatsList) return;
+
+        try {
+            const res = await fetch("/chat/conversations");
+            if (!res.ok) return;
+            const data = await res.json();
+            const convs = data.conversations || [];
+
+            if (convs.length === 0) {
+                pastChatsList.innerHTML = `
+                    <div class="empty-history-text">No previous chats yet. Start talking to save a conversation!</div>
+                `;
+                return;
+            }
+
+            pastChatsList.innerHTML = "";
+            convs.forEach(c => {
+                const item = document.createElement("div");
+                item.classList.add("past-chat-item");
+                if (c.conversation_id === conversationId) {
+                    item.classList.add("active");
+                }
+
+                item.innerHTML = `
+                    <div class="past-chat-info">
+                        <span class="past-chat-title" title="${escapeHtml(c.title)}">${escapeHtml(c.title)}</span>
+                    </div>
+                    <span class="past-chat-badge">${c.message_count} msgs</span>
+                    <button class="past-chat-delete" title="Delete conversation" data-id="${c.conversation_id}">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="18" y1="6" x2="6" y2="18"></line>
+                            <line x1="6" y1="6" x2="18" y2="18"></line>
+                        </svg>
+                    </button>
+                `;
+
+                // Click to switch conversation
+                item.addEventListener("click", (e) => {
+                    if (e.target.closest(".past-chat-delete")) return;
+                    switchToConversation(c.conversation_id);
+                });
+
+                // Click delete icon
+                const deleteBtn = item.querySelector(".past-chat-delete");
+                deleteBtn.addEventListener("click", async (e) => {
+                    e.stopPropagation();
+                    await deleteConversation(c.conversation_id);
+                });
+
+                pastChatsList.appendChild(item);
+            });
+
+        } catch (err) {
+            console.warn("Failed to load past chats:", err);
+        }
+    }
+
+    async function switchToConversation(cid) {
+        if (isProcessing) return;
+        conversationId = cid;
+
+        // Highlight active item in sidebar
+        document.querySelectorAll(".past-chat-item").forEach(el => {
+            const btn = el.querySelector(".past-chat-delete");
+            if (btn && btn.getAttribute("data-id") === cid) {
+                el.classList.add("active");
+            } else {
+                el.classList.remove("active");
+            }
+        });
+
+        // Load messages from server
+        try {
+            const res = await fetch(`/chat/history/${cid}`);
+            if (!res.ok) throw new Error("Could not load history.");
+            const data = await res.json();
+            const history = data.history || [];
+
+            chatMessages.innerHTML = "";
+            if (history.length === 0) {
+                chatMessages.innerHTML = `
+                    <div class="message assistant-message">
+                        <div class="message-avatar">AI</div>
+                        <div class="message-content">
+                            <p>This conversation has no messages yet.</p>
+                        </div>
+                    </div>
+                `;
+            } else {
+                history.forEach(m => {
+                    appendMessage(m.role, m.content, false);
+                });
+            }
+            scrollToBottom();
+            closeSidebar();
+
+        } catch (err) {
+            showError("Failed to load chat history: " + err.message);
+        }
+    }
+
+    async function deleteConversation(cid) {
+        try {
+            await fetch(`/chat/conversations/${cid}`, { method: "DELETE" });
+            if (conversationId === cid) {
+                startNewChat();
+            }
+            loadPastChats();
+        } catch (err) {
+            console.error("Delete conversation error:", err);
+        }
+    }
+
+    // --------------------------------------------------------------------------
+    // UI Helpers & Utilities
+    // --------------------------------------------------------------------------
+
+    function appendMessage(role, text, shouldScroll = true) {
         const messageDiv = document.createElement("div");
         messageDiv.classList.add("message", `${role}-message`);
 
@@ -183,7 +328,9 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.appendChild(contentDiv);
 
         chatMessages.appendChild(messageDiv);
-        scrollToBottom();
+        if (shouldScroll) {
+            scrollToBottom();
+        }
     }
 
     function showTypingIndicator() {
@@ -214,6 +361,25 @@ document.addEventListener("DOMContentLoaded", () => {
         chatMessages.scrollTop = chatMessages.scrollHeight;
     }
 
+    function updateContextBadge(n) {
+        if (contextBadge) {
+            contextBadge.textContent = `Context: Last ${n} msgs`;
+        }
+    }
+
+    function toggleSidebar() {
+        if (!sidebar) return;
+        sidebar.classList.toggle("open");
+        if (sidebarOverlay) {
+            sidebarOverlay.classList.toggle("active");
+        }
+    }
+
+    function closeSidebar() {
+        if (sidebar) sidebar.classList.remove("open");
+        if (sidebarOverlay) sidebarOverlay.classList.remove("active");
+    }
+
     function generateUUID() {
         if (typeof crypto !== "undefined" && crypto.randomUUID) {
             return crypto.randomUUID();
@@ -221,31 +387,35 @@ document.addEventListener("DOMContentLoaded", () => {
         return "sess-" + Math.random().toString(36).substring(2, 11) + "-" + Date.now();
     }
 
-    // Basic Markdown & Linebreak Formatter for AI responses
-    function formatMessageText(rawText) {
-        if (!rawText) return "";
-
-        // 1. Escape HTML special characters
-        let safe = rawText
+    function escapeHtml(text) {
+        if (!text) return "";
+        return text
             .replace(/&/g, "&amp;")
             .replace(/</g, "&lt;")
             .replace(/>/g, "&gt;");
+    }
 
-        // 2. Fenced code blocks ```language ... ```
+    // Markdown & Formatting Parser for AI responses
+    function formatMessageText(rawText) {
+        if (!rawText) return "";
+
+        let safe = escapeHtml(rawText);
+
+        // Fenced code blocks ```code```
         safe = safe.replace(/```([\s\S]*?)```/g, (match, codeContent) => {
             return `<pre><code>${codeContent.trim()}</code></pre>`;
         });
 
-        // 3. Inline code `code`
+        // Inline code `code`
         safe = safe.replace(/`([^`]+)`/g, "<code>$1</code>");
 
-        // 4. Bold **text**
+        // Bold **text**
         safe = safe.replace(/\*\*([^*]+)\*\*/g, "<strong>$1</strong>");
 
-        // 5. Italic *text*
+        // Italic *text*
         safe = safe.replace(/\*([^*]+)\*/g, "<em>$1</em>");
 
-        // 6. Split into paragraphs by double newlines
+        // Paragraphs & Linebreaks
         const paragraphs = safe.split(/\n\s*\n/);
         return paragraphs
             .map((p) => `<p>${p.replace(/\n/g, "<br>")}</p>`)

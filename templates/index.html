@@ -7,80 +7,139 @@
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-    <div class="chat-wrapper">
-        <!-- Chat Header -->
-        <header class="chat-header">
-            <div class="header-info">
-                <div class="header-avatar">AI</div>
-                <div>
-                    <h1 class="header-title">Educational AI Assistant</h1>
-                    <div class="header-status">
-                        <span class="status-dot"></span>
-                        <span class="status-text">Powered by Google Gemini</span>
-                    </div>
+    <div class="app-layout">
+        <!-- Left Sidebar: Past Chats & History -->
+        <aside id="chat-sidebar" class="chat-sidebar">
+            <div class="sidebar-header">
+                <div class="sidebar-title">
+                    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                    <span>Past Chats</span>
                 </div>
-            </div>
-            <div class="header-actions">
-                <button id="new-chat-btn" class="btn btn-secondary" title="Start a fresh conversation">
+                <button id="new-chat-btn" class="btn btn-new-chat" title="Start a fresh conversation">
                     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
                         <path d="M12 5v14M5 12h14"/>
                     </svg>
-                    New Chat
+                    <span>+ New Chat</span>
                 </button>
             </div>
-        </header>
 
-        <!-- Error Notification Banner -->
-        <div id="error-banner" class="error-banner" style="display: none;">
-            <span id="error-text">An error occurred.</span>
-            <button id="error-close-btn" class="error-close" aria-label="Close error">&times;</button>
-        </div>
-
-        <!-- Chat Messages Container -->
-        <main id="chat-messages" class="chat-messages" aria-live="polite">
-            <!-- Initial Welcome Message from Assistant -->
-            <div class="message assistant-message">
-                <div class="message-avatar">AI</div>
-                <div class="message-content">
-                    <p>Hello! I am your friendly educational AI assistant. I'm here to help you learn programming, computer science, and Artificial Intelligence.</p>
-                    <p>Ask me any question, explore a technical topic, or ask for code examples to get started!</p>
+            <!-- Context Window Management (Configurable N) -->
+            <div class="context-config-panel">
+                <label for="n-context-input" class="context-label">
+                    Context Window (Last N Messages):
+                </label>
+                <div class="context-input-row">
+                    <input 
+                        type="number" 
+                        id="n-context-input" 
+                        min="2" 
+                        max="50" 
+                        step="2" 
+                        value="6"
+                        title="Number of recent messages sent to Gemini as context" 
+                    />
+                    <span class="context-unit">messages</span>
                 </div>
+                <small class="context-desc">Prunes messages beyond N to save tokens and prevent context overflow.</small>
             </div>
-        </main>
 
-        <!-- Typing Indicator (Hidden by default) -->
-        <div id="typing-indicator" class="typing-indicator" style="display: none;">
-            <div class="message-avatar">AI</div>
-            <div class="typing-bubble">
-                <span class="dot"></span>
-                <span class="dot"></span>
-                <span class="dot"></span>
+            <!-- Past Chats List -->
+            <div class="sidebar-section-title">History</div>
+            <div id="past-chats-list" class="past-chats-list">
+                <!-- Dynamically loaded past conversations -->
+                <div class="empty-history-text">No previous chats yet. Start talking to save a conversation!</div>
             </div>
-        </div>
+        </aside>
 
-        <!-- Chat Input Footer -->
-        <footer class="chat-footer">
-            <form id="chat-form" class="chat-form">
-                <div class="input-container">
-                    <textarea 
-                        id="user-input" 
-                        class="chat-input" 
-                        placeholder="Type your question or message here..." 
-                        rows="1" 
-                        required></textarea>
-                    <button type="submit" id="send-btn" class="btn btn-primary" aria-label="Send message">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-                            <line x1="22" y1="2" x2="11" y2="13"></line>
-                            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+        <!-- Sidebar overlay for mobile screens -->
+        <div id="sidebar-overlay" class="sidebar-overlay"></div>
+
+        <!-- Main Chat Area -->
+        <div class="chat-wrapper">
+            <!-- Chat Header -->
+            <header class="chat-header">
+                <div class="header-left">
+                    <button id="sidebar-toggle" class="sidebar-toggle-btn" aria-label="Toggle Past Chats">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <line x1="3" y1="12" x2="21" y2="12"></line>
+                            <line x1="3" y1="6" x2="21" y2="6"></line>
+                            <line x1="3" y1="18" x2="21" y2="18"></line>
                         </svg>
-                        <span>Send</span>
+                    </button>
+                    <div class="header-avatar">AI</div>
+                    <div>
+                        <h1 class="header-title">Educational AI Assistant</h1>
+                        <div class="header-status">
+                            <span class="status-dot"></span>
+                            <span class="status-text">Powered by Google Gemini</span>
+                            <span id="context-badge" class="badge-context">Context: Last 6 msgs</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="header-actions">
+                    <button id="header-new-chat-btn" class="btn btn-secondary" title="Start a fresh conversation">
+                        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                            <path d="M12 5v14M5 12h14"/>
+                        </svg>
+                        <span>New Chat</span>
                     </button>
                 </div>
-                <div class="input-hint">
-                    Press <strong>Enter</strong> to send, <strong>Shift + Enter</strong> for a new line
+            </header>
+
+            <!-- Error Notification Banner -->
+            <div id="error-banner" class="error-banner" style="display: none;">
+                <span id="error-text">An error occurred.</span>
+                <button id="error-close-btn" class="error-close" aria-label="Close error">&times;</button>
+            </div>
+
+            <!-- Chat Messages Container -->
+            <main id="chat-messages" class="chat-messages" aria-live="polite">
+                <!-- Initial Welcome Message from Assistant -->
+                <div class="message assistant-message">
+                    <div class="message-avatar">AI</div>
+                    <div class="message-content">
+                        <p>Hello! I am your friendly educational AI assistant. I'm here to help you learn programming, computer science, and Artificial Intelligence.</p>
+                        <p>Ask me any question, explore a technical topic, or ask for code examples to get started!</p>
+                    </div>
                 </div>
-            </form>
-        </footer>
+            </main>
+
+            <!-- Typing Indicator (Hidden by default) -->
+            <div id="typing-indicator" class="typing-indicator" style="display: none;">
+                <div class="message-avatar">AI</div>
+                <div class="typing-bubble">
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                    <span class="dot"></span>
+                </div>
+            </div>
+
+            <!-- Chat Input Footer -->
+            <footer class="chat-footer">
+                <form id="chat-form" class="chat-form">
+                    <div class="input-container">
+                        <textarea 
+                            id="user-input" 
+                            class="chat-input" 
+                            placeholder="Type your question or message here..." 
+                            rows="1" 
+                            required></textarea>
+                        <button type="submit" id="send-btn" class="btn btn-primary" aria-label="Send message">
+                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <line x1="22" y1="2" x2="11" y2="13"></line>
+                                <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+                            </svg>
+                            <span>Send</span>
+                        </button>
+                    </div>
+                    <div class="input-hint">
+                        Press <strong>Enter</strong> to send, <strong>Shift + Enter</strong> for a new line
+                    </div>
+                </form>
+            </footer>
+        </div>
     </div>
 
     <script src="{{ url_for('static', filename='script.js') }}"></script>
