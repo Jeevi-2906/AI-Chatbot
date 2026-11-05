@@ -401,6 +401,20 @@ document.addEventListener("DOMContentLoaded", () => {
 
         let safe = escapeHtml(rawText);
 
+        // Clean up any stray LaTeX math formatting into clean plain readable text
+        safe = safe.replace(/\\text\{([^}]+)\}/g, "$1");
+        safe = safe.replace(/\\frac\{([^}]+)\}\{([^}]+)\}/g, "($1 / $2)");
+        safe = safe.replace(/\\times/g, "×");
+        safe = safe.replace(/\\cdot/g, "·");
+        safe = safe.replace(/\^\\circ/g, "°");
+        safe = safe.replace(/\\circ/g, "°");
+        safe = safe.replace(/\$\$([^$]+)\$\$/g, "$1");
+        safe = safe.replace(/\$([^$]+)\$/g, "$1");
+
+        // Convert markdown headers into clean bold headings
+        safe = safe.replace(/###\s+(.+)/g, "<strong>$1</strong>");
+        safe = safe.replace(/##\s+(.+)/g, "<strong>$1</strong>");
+
         // Fenced code blocks ```code```
         safe = safe.replace(/```([\s\S]*?)```/g, (match, codeContent) => {
             return `<pre><code>${codeContent.trim()}</code></pre>`;
