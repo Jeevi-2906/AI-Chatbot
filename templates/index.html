@@ -25,7 +25,7 @@
                 </button>
             </div>
 
-            <!-- Context Window Management (Configurable N) -->
+            <!--Context Window Management-->
             <div class="context-config-panel">
                 <label for="n-context-input" class="context-label">
                     Context Window (Last N Messages):
@@ -48,17 +48,16 @@
             <!-- Past Chats List -->
             <div class="sidebar-section-title">History</div>
             <div id="past-chats-list" class="past-chats-list">
-                <!-- Dynamically loaded past conversations -->
+                <!-- Load past conversations -->
                 <div class="empty-history-text">No previous chats yet. Start talking to save a conversation!</div>
             </div>
         </aside>
 
-        <!-- Sidebar overlay for mobile screens -->
         <div id="sidebar-overlay" class="sidebar-overlay"></div>
 
-        <!-- Main Chat Area -->
+        <!-- Main Chat-->
         <div class="chat-wrapper">
-            <!-- Chat Header -->
+            <!--Header -->
             <header class="chat-header">
                 <div class="header-left">
                     <button id="sidebar-toggle" class="sidebar-toggle-btn" aria-label="Toggle Past Chats">
@@ -76,15 +75,14 @@
                 </div>
             </header>
 
-            <!-- Error Notification Banner -->
+            <!-- Error Handler-->
             <div id="error-banner" class="error-banner" style="display: none;">
                 <span id="error-text">An error occurred.</span>
                 <button id="error-close-btn" class="error-close" aria-label="Close error">&times;</button>
             </div>
 
-            <!-- Chat Messages Container -->
             <main id="chat-messages" class="chat-messages" aria-live="polite">
-                <!-- Initial Welcome Message from Assistant -->
+                <!-- Welcome Message -->
                 <div class="message assistant-message">
                     <div class="message-avatar">AI</div>
                     <div class="message-content">
@@ -94,7 +92,6 @@
                 </div>
             </main>
 
-            <!-- Typing Indicator (Hidden by default) -->
             <div id="typing-indicator" class="typing-indicator" style="display: none;">
                 <div class="message-avatar">AI</div>
                 <div class="typing-bubble">
@@ -104,7 +101,6 @@
                 </div>
             </div>
 
-            <!-- Chat Input Footer -->
             <footer class="chat-footer">
                 <form id="chat-form" class="chat-form">
                     <div class="input-container">

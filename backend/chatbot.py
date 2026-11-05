@@ -1,15 +1,3 @@
-"""
-backend/chatbot.py - Gemini API Integration and Multi-Turn Conversation Manager.
-
-Responsibilities:
-1. Initialize the official Google GenAI SDK client.
-2. Define the educational system prompt.
-3. Maintain in-memory conversation histories for distinct conversation IDs.
-4. Implement Context Window Management using Last-N-Message Truncation.
-5. Prepare multi-turn context and communicate with Gemini API with robust error handling.
-6. Return AI-generated responses while protecting security and credentials.
-"""
-
 import os
 import sys
 import time
@@ -19,7 +7,6 @@ from google import genai
 from google.genai import types
 from google.genai.errors import APIError, ClientError, ServerError
 
-# Ensure terminal stdout uses UTF-8 encoding on Windows consoles
 if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     try:
         sys.stdout.reconfigure(encoding="utf-8")
@@ -27,11 +14,8 @@ if sys.stdout and hasattr(sys.stdout, "reconfigure"):
     except Exception:
         pass
 
-# Load environment variables from .env
 load_dotenv(override=True)
 
-# System prompt establishing a friendly educational AI assistant persona.
-# Kept separate from ordinary conversation turns and injected via GenerateContentConfig.
 SYSTEM_PROMPT = """You are a friendly, encouraging, and knowledgeable educational AI assistant.
 Your goal is to help beginners understand programming, computer science, and Artificial Intelligence concepts.
 
@@ -45,12 +29,8 @@ Core Rules & Guidelines:
 7. Keep responses concise, clean, well-structured, and focused.
 """
 
-# In-memory store for conversations:
-# Key: conversation_id (str)
-# Value: list of message dicts [{"role": "user"|"assistant", "content": "..."}]
 conversations: Dict[str, List[Dict[str, str]]] = {}
 
-# Metadata for conversations (title, timestamps) to support Past Chats list
 conversation_metadata: Dict[str, Dict] = {}
 
 
@@ -68,7 +48,6 @@ def get_gemini_client(custom_key: Optional[str] = None) -> genai.Client:
     if custom_key is not None:
         api_key = custom_key.strip()
     else:
-        # Reload environment to automatically pick up any edits to .env
         load_dotenv(override=True)
         api_key = os.getenv("GEMINI_API_KEY", "").strip()
 
@@ -178,15 +157,10 @@ def truncate_history(history: List[Dict[str, str]], max_messages: Optional[int] 
         max_messages = get_max_history_messages()
 
     if not history or len(history) <= max_messages:
-        # Full history fits within context window
         return list(history)
 
-    # 1. Take the last N messages
     truncated = list(history[-max_messages:])
 
-    # 2. Preserve message pair integrity:
-    # A valid multi-turn conversation sequence should start with a 'user' message.
-    # If our slice starts with an orphaned 'assistant' response, strip it.
     if truncated and truncated[0].get("role") == "assistant":
         truncated = truncated[1:]
 
@@ -236,10 +210,8 @@ def send_chat_message(
 
     history = get_or_create_conversation(conversation_id)
 
-    # 1. Temporarily append user message to local history
     history.append({"role": "user", "content": clean_message})
 
-    # Track conversation metadata for the "Past Chats" history panel
     now = time.time()
     if conversation_id not in conversation_metadata:
         preview = clean_message[:35] + ("..." if len(clean_message) > 35 else "")
@@ -258,14 +230,11 @@ def send_chat_message(
             client = get_gemini_client(custom_key=api_key_override)
             model_name = get_model_name()
 
-            # 2. Apply Last-N-Message truncation (using requested N or .env MAX_HISTORY_MESSAGES)
             effective_n = max_history if (max_history is not None and max_history > 0) else None
             truncated_context = truncate_history(history, max_messages=effective_n)
 
-            # 3. Build contents payload from the truncated context window
             gemini_contents = build_gemini_contents(truncated_context)
 
-            # 4. Configure system instruction
             config = types.GenerateContentConfig(
                 system_instruction=SYSTEM_PROMPT,
                 temperature=0.7,
@@ -281,7 +250,6 @@ def send_chat_message(
             if not reply_text:
                 reply_text = "I received your message, but no response text was generated."
 
-            # 5. Successfully received response: append assistant message
             history.append({"role": "assistant", "content": reply_text})
             conversation_metadata[conversation_id]["updated_at"] = time.time()
             return reply_text
@@ -290,7 +258,6 @@ def send_chat_message(
             last_error = e
             status_code = getattr(e, "code", None) or getattr(e, "status_code", 500)
             
-            # If transient rate limit or service busy, pause briefly and retry
             if status_code in (429, 503) and attempt < max_retries and api_key_override is None:
                 time.sleep(3.0 * attempt)
                 continue
@@ -300,7 +267,6 @@ def send_chat_message(
             last_error = e
             break
 
-    # If all attempts fail, revert the uncommitted user message
     if history and history[-1]["role"] == "user":
         history.pop()
 

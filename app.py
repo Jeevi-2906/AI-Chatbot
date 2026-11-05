@@ -1,15 +1,3 @@
-"""
-app.py - Main Flask Application Server.
-
-Routes:
-- GET /                    : Serves the web-based chatbot frontend interface.
-- GET /health              : Health-check endpoint for server status.
-- POST /chat               : Main chat endpoint; processes user messages, manages
-                             multi-turn conversation history, and calls Gemini API.
-- POST /chat/reset         : Clears conversation history for a given conversation_id.
-- GET /chat/history/<cid>  : Returns the current in-memory history for debugging/verification.
-"""
-
 import os
 import uuid
 from flask import Flask, render_template, request, jsonify
@@ -25,10 +13,8 @@ from backend.chatbot import (
     get_max_history_messages,
 )
 
-# Load environment variables
 load_dotenv(override=True)
 
-# Initialize Flask application
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "dev-secret-key-12345")
 
@@ -67,7 +53,6 @@ def chat():
         "conversation_id": "active-conversation-id"
     }
     """
-    # 1. Validate that the request has JSON content
     if not request.is_json:
         return jsonify({
             "error": "Invalid request: Content-Type must be application/json."
@@ -79,21 +64,18 @@ def chat():
             "error": "Invalid request: Expected a JSON object in the request body."
         }), 400
 
-    # 2. Extract and validate user message
     user_message = data.get("message")
     if user_message is None or not isinstance(user_message, str) or not user_message.strip():
         return jsonify({
             "error": "Validation error: 'message' is required and cannot be empty."
         }), 400
 
-    # 3. Retrieve or generate conversation_id
     conversation_id = data.get("conversation_id")
     if not conversation_id or not isinstance(conversation_id, str) or not conversation_id.strip():
         conversation_id = str(uuid.uuid4())
     else:
         conversation_id = conversation_id.strip()
 
-    # Optional key override and custom N history size
     api_key_override = data.get("api_key_override")
     max_history = data.get("max_history")
     if max_history is not None:
@@ -102,7 +84,6 @@ def chat():
         except (ValueError, TypeError):
             max_history = None
 
-    # 4. Communicate with Gemini API via conversation manager
     try:
         reply = send_chat_message(
             conversation_id=conversation_id,
@@ -116,14 +97,12 @@ def chat():
         }), 200
 
     except ValueError as ve:
-        # Client validation or missing API key
         return jsonify({
             "error": str(ve),
             "conversation_id": conversation_id
         }), 400
 
     except RuntimeError as re:
-        # Upstream Gemini API error, network timeout, or rate limit
         err_msg = str(re)
         status_code = 502
         if "Authentication failed" in err_msg:
@@ -139,9 +118,7 @@ def chat():
         }), status_code
 
     except Exception as e:
-        # Log server error to stderr for debugging
         print(f"[INTERNAL ERROR IN /chat]: {type(e).__name__}: {str(e)}", flush=True)
-        # Internal server error without leaking stack traces or sensitive data
         return jsonify({
             "error": "An internal server error occurred while processing your request. Please try again.",
             "conversation_id": conversation_id
@@ -205,7 +182,6 @@ def get_history(cid: str):
     }), 200
 
 
-# Custom error handlers to guarantee JSON responses and prevent stack trace leaks
 @app.errorhandler(404)
 def not_found(e):
     return jsonify({"error": "Resource not found."}), 404
