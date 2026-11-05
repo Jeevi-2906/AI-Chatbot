@@ -69,9 +69,9 @@ document.addEventListener("DOMContentLoaded", () => {
         userInput.style.height = `${Math.min(userInput.scrollHeight, 120)}px`;
     });
 
-    // New Chat buttons (both sidebar and header)
-    newChatBtn.addEventListener("click", startNewChat);
-    headerNewChatBtn.addEventListener("click", startNewChat);
+    // New Chat button (sidebar)
+    if (newChatBtn) newChatBtn.addEventListener("click", startNewChat);
+    if (headerNewChatBtn) headerNewChatBtn.addEventListener("click", startNewChat);
 
     // Context N Input Change
     if (nContextInput) {
